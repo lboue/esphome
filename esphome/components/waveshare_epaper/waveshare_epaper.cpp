@@ -4712,7 +4712,7 @@ void HOT WaveshareEPaper7P5InH::draw_absolute_pixel_internal(int x, int y, Color
 
 int WaveshareEPaper7P5InH::get_width_internal() { return 800; }
 int WaveshareEPaper7P5InH::get_height_internal() { return 480; }
-uint32_t WaveshareEPaper7P5InH::idle_timeout_() { return 30000; }
+uint32_t WaveshareEPaper7P5InH::idle_timeout_() { return 60000; }
 void WaveshareEPaper7P5InH::dump_config() {
   LOG_DISPLAY("", "Waveshare E-Paper", this);
   ESP_LOGCONFIG(TAG, "  Model: 7.5inH");
