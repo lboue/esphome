@@ -4,6 +4,8 @@
 #include "display_color_utils.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include <cmath>
+constexpr double PI = 3.14159265358979323846;
 
 namespace esphome {
 namespace display {
@@ -43,10 +45,10 @@ void Display::line_at_angle(int x, int y, int angle, int length, Color color) {
 
 void Display::line_at_angle(int x, int y, int angle, int start_radius, int stop_radius, Color color) {
   // Calculate start and end points
-  int x1 = (start_radius * cos(angle * M_PI / 180)) + x;
-  int y1 = (start_radius * sin(angle * M_PI / 180)) + y;
-  int x2 = (stop_radius * cos(angle * M_PI / 180)) + x;
-  int y2 = (stop_radius * sin(angle * M_PI / 180)) + y;
+  int x1 = (start_radius * cos(angle * PI / 180)) + x;
+  int y1 = (start_radius * sin(angle * PI / 180)) + y;
+  int x2 = (stop_radius * cos(angle * PI / 180)) + x;
+  int y2 = (stop_radius * sin(angle * PI / 180)) + y;
 
   // Draw line
   this->line(x1, y1, x2, y2, color);
@@ -222,7 +224,7 @@ void Display::filled_gauge(int center_x, int center_y, int radius1, int radius2,
   int e2max, e2min;
   progress = std::max(0, std::min(progress, 100));  // 0..100
   int draw_progress = progress > 50 ? (100 - progress) : progress;
-  float tan_a = (progress == 50) ? 65535 : tan(float(draw_progress) * M_PI / 100);  // slope
+  float tan_a = (progress == 50) ? 65535 : tan(float(draw_progress) * PI / 100);  // slope
 
   do {
     // outer dots
