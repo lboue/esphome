@@ -1,7 +1,8 @@
 import esphome.codegen as cg
-from esphome.core import CORE
-from esphome.const import CONF_ID
 import esphome.config_validation as cv
+
+# from esphome.const import CONF_ID
+# from esphome.core import CORE
 
 CODEOWNERS = ["@esphome/core"]
 
@@ -44,6 +45,9 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
+    if CONF_IMPLEMENTATION not in config:
+        raise ValueError(f"Missing required configuration key: {CONF_IMPLEMENTATION}")
+
     impl = config[CONF_IMPLEMENTATION]
     if impl == IMPLEMENTATION_LWIP_TCP:
         cg.add_define("USE_SOCKET_IMPL_LWIP_TCP")
