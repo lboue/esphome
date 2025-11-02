@@ -12,7 +12,7 @@ from esphome.components.zephyr import (
 import esphome.config_validation as cv
 
 # from esphome.const import CONF_ID, CONF_ENABLE_IPV6, CONF_OTA, CONF_TRANSPORT, CONF_UDP
-from esphome.const import CONF_ENABLE_IPV6, CONF_ID, CONF_OTA, CONF_UDP
+from esphome.const import CONF_ENABLE_IPV6, CONF_ID, CONF_OTA
 from esphome.core import _LOGGER, CORE, coroutine_with_priority
 
 from . import config_validation as ot_cv
@@ -26,6 +26,7 @@ from .const import (
     CONF_RADIO_TX_POWER,
     CONF_SHELL,
     CONF_TRANSPORT,
+    CONF_UDP,
     CONF_XPANID,
     DEFAULT_CHANNEL,
     DEFAULT_FORCE_DATASET,

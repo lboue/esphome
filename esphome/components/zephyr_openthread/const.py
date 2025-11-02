@@ -15,6 +15,7 @@ CONF_PSKC = "pskc"
 CONF_FORCE_DATASET = "force_dataset"
 CONF_SHELL = "shell"
 CONF_TRANSPORT = "transport"
+CONF_UDP = "udp"
 
 # Default values
 DEFAULT_CHANNEL = 15
