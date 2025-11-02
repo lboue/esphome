@@ -1,5 +1,3 @@
-from typing import Final
-
 import esphome.codegen as cg
 
 # OpenThread constants
@@ -16,6 +14,7 @@ CONF_RADIO_TX_POWER = "radio_tx_power"
 CONF_PSKC = "pskc"
 CONF_FORCE_DATASET = "force_dataset"
 CONF_SHELL = "shell"
+CONF_TRANSPORT = "transport"
 
 # Default values
 DEFAULT_CHANNEL = 15

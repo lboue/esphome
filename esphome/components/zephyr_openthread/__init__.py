@@ -1,39 +1,43 @@
-import esphome.codegen as cg
-import esphome.config_validation as cv
-from esphome.components import gpio
-from esphome import pins
-from esphome.components.zephyr import (
-    zephyr_add_prj_conf,
-    zephyr_add_overlay,
-    zephyr_add_mcuboot_overlay,
-)
-from esphome.const import CONF_ID, CONF_ENABLE_IPV6, CONF_OTA, CONF_TRANSPORT, CONF_UDP
-from esphome.core import CORE, coroutine_with_priority, _LOGGER
 import enum
 
+from esphome import pins
+import esphome.codegen as cg
+
+# from esphome.components import gpio
+from esphome.components.zephyr import (
+    # zephyr_add_mcuboot_overlay,
+    zephyr_add_overlay,
+    zephyr_add_prj_conf,
+)
+import esphome.config_validation as cv
+
+# from esphome.const import CONF_ID, CONF_ENABLE_IPV6, CONF_OTA, CONF_TRANSPORT, CONF_UDP
+from esphome.const import CONF_ENABLE_IPV6, CONF_ID, CONF_OTA, CONF_UDP
+from esphome.core import _LOGGER, CORE, coroutine_with_priority
+
+from . import config_validation as ot_cv
 from .const import (
     CONF_CHANNEL,
+    CONF_FORCE_DATASET,
     CONF_NETWORK_KEY,
     CONF_NETWORK_NAME,
     CONF_PANID,
-    CONF_RADIO_TX_POWER,
-    CONF_XPANID,
     CONF_PSKC,
-    CONF_FORCE_DATASET,
+    CONF_RADIO_TX_POWER,
     CONF_SHELL,
+    CONF_TRANSPORT,
+    CONF_XPANID,
     DEFAULT_CHANNEL,
+    DEFAULT_FORCE_DATASET,
     DEFAULT_NETWORK_KEY,
     DEFAULT_NETWORK_NAME,
     DEFAULT_PANID,
-    DEFAULT_RADIO_TX_POWER,
-    DEFAULT_XPANID,
     DEFAULT_PSKC,
-    DEFAULT_FORCE_DATASET,
+    DEFAULT_RADIO_TX_POWER,
     DEFAULT_SHELL,
+    DEFAULT_XPANID,
     zephyr_openthread_ns,
 )
-
-from . import config_validation as ot_cv
 
 CODEOWNERS = ["@felipejfc"]
 DEPENDENCIES = ["zephyr", "nrf52"]
@@ -49,10 +53,13 @@ OpenThreadDNSComponent = zephyr_openthread_ns.class_(
 CONF_FACTORY_RESET_PIN = "factory_reset_pin"
 
 CONF_DEVICE_TYPE = "device_type"
+
+
 # Define enum for device types
 class DeviceType(enum.Enum):
     MTD = "mtd"
     FTD = "ftd"
+
 
 DEFAULT_DEVICE_TYPE = DeviceType.FTD
 
@@ -60,6 +67,7 @@ DEVICE_TYPE_OPTIONS = {
     "mtd": DeviceType.MTD,
     "ftd": DeviceType.FTD,
 }
+
 
 # Create a custom validator for hex strings with a specific length
 def hex_string_length(length):
@@ -95,18 +103,18 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_PANID, default=DEFAULT_PANID): cv.hex_uint16_t,
             cv.Optional(CONF_NETWORK_NAME, default=DEFAULT_NETWORK_NAME): cv.string,
             cv.Optional(CONF_XPANID, default=DEFAULT_XPANID): hex_string_length(16),
-            cv.Optional(CONF_NETWORK_KEY, default=DEFAULT_NETWORK_KEY): hex_string_length(
-                32
-            ),
+            cv.Optional(
+                CONF_NETWORK_KEY, default=DEFAULT_NETWORK_KEY
+            ): hex_string_length(32),
             cv.Optional(CONF_PSKC, default=DEFAULT_PSKC): hex_string_length(32),
-            cv.Optional(CONF_RADIO_TX_POWER, default=DEFAULT_RADIO_TX_POWER): cv.int_range(
-                min=-20, max=20
-            ),
+            cv.Optional(
+                CONF_RADIO_TX_POWER, default=DEFAULT_RADIO_TX_POWER
+            ): cv.int_range(min=-20, max=20),
             cv.Optional(CONF_FORCE_DATASET, default=DEFAULT_FORCE_DATASET): cv.boolean,
             cv.Optional(CONF_SHELL, default=DEFAULT_SHELL): cv.boolean,
-            cv.Optional(CONF_ENABLE_IPV6, default=True): ot_cv.require_framework_version(
-                cv.Version(1, 0, 0)
-            ),
+            cv.Optional(
+                CONF_ENABLE_IPV6, default=True
+            ): ot_cv.require_framework_version(cv.Version(1, 0, 0)),
             cv.Optional(CONF_FACTORY_RESET_PIN): pins.gpio_input_pin_schema,
         }
     ).extend(cv.COMPONENT_SCHEMA),
@@ -149,14 +157,20 @@ async def to_code(config):
                     # Get the ID of this specific zephyr_mcumgr OTA component
                     mcumgr_ota_id = ota_config.get(CONF_ID)
                     if mcumgr_ota_id:
-                        _LOGGER.debug(f"Found zephyr_mcumgr OTA component with UDP transport (ID: {mcumgr_ota_id}). Setting dependency.")
+                        _LOGGER.debug(
+                            f"Found zephyr_mcumgr OTA component with UDP transport (ID: {mcumgr_ota_id}). Setting dependency."
+                        )
                         mcumgr = await cg.get_variable(mcumgr_ota_id)
                         cg.add(var.set_mcumgr(mcumgr))
                         break
                     else:
-                         _LOGGER.warning("Found zephyr_mcumgr OTA with UDP but no ID?") # Should not happen with proper config validation
+                        _LOGGER.warning(
+                            "Found zephyr_mcumgr OTA with UDP but no ID?"
+                        )  # Should not happen with proper config validation
                 else:
-                     _LOGGER.debug(f"Found zephyr_mcumgr OTA component but transport is not UDP ({ota_config.get(CONF_TRANSPORT)}). Skipping dependency.")
+                    _LOGGER.debug(
+                        f"Found zephyr_mcumgr OTA component but transport is not UDP ({ota_config.get(CONF_TRANSPORT)}). Skipping dependency."
+                    )
     else:
         _LOGGER.debug("No OTA configuration found. Skipping mcumgr dependency.")
 
@@ -213,11 +227,13 @@ async def to_code(config):
         zephyr_add_prj_conf("CONFIG_OPENTHREAD_DNS_CLIENT", True)
         _LOGGER.debug("mDNS component found, enabling OpenThread SRP client features.")
     else:
-        _LOGGER.debug("mDNS component not found, OpenThread SRP client features disabled.")
+        _LOGGER.debug(
+            "mDNS component not found, OpenThread SRP client features disabled."
+        )
 
     # Stack sizes
     zephyr_add_prj_conf("MAIN_STACK_SIZE", 10240)
-    
+
     # OpenThread settings
     zephyr_add_prj_conf("OPENTHREAD_CHANNEL", config[CONF_CHANNEL])
     panid_int = int(config[CONF_PANID])  # Already an integer from cv.hex_uint16_t
