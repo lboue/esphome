@@ -62,7 +62,7 @@ class DeviceType(enum.Enum):
     FTD = "ftd"
 
 
-DEFAULT_DEVICE_TYPE = DeviceType.FTD
+DEFAULT_DEVICE_TYPE = "ftd"
 
 DEVICE_TYPE_OPTIONS = {
     "mtd": DeviceType.MTD,
