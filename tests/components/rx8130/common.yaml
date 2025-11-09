@@ -1,0 +1,7 @@
+esphome:
+  on_boot:
+    - rx8130.read_time
+    - rx8130.write_time
+
+time:
+  - platform: rx8130
