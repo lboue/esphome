@@ -1,6 +1,9 @@
 #include "bmi270.h"
+#include "/workspaces/esphome/esphome/components/bmi270/bmi2/bmi2.h"
+#include "/workspaces/esphome/esphome/components/bmi270/bmi2/bmi270.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include <cmath>
 
 namespace esphome {
 namespace bmi270 {
@@ -14,7 +17,7 @@ static const char *const TAG = "bmi270";
 
 const uint8_t BMI270_REGISTER_CHIPID = 0x00;
 // BMI270 chip ID value (from common BMI270/BMI2xx implementations)
-const uint8_t BMI270_CHIP_ID = 0x24;
+// BMI270 chip ID is provided by the vendored bmi270 header as BMI270_CHIP_ID
 
 const uint8_t BMI270_REGISTER_CMD = 0x7E;
 enum class Cmd : uint8_t {
@@ -123,13 +126,120 @@ const uint8_t BMI270_REGISTER_DATA_TEMP_MSB = 0x21;
 
 const float GRAVITY_EARTH = 9.80665f;
 
+// --- BMI2 platform wrappers -------------------------------------------------
+// These adapt the BMI2 SDK read/write/delay callbacks to esphome's I2CDevice.
+static int8_t bmi2_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr) {
+  if (intf_ptr == nullptr)
+    return BMI2_E_NULL_PTR;
+  // intf_ptr points to the BMI270Component instance; call its safe wrapper
+  auto comp = static_cast<BMI270Component *>(intf_ptr);
+  if (comp == nullptr)
+    return BMI2_E_NULL_PTR;
+  i2c::ErrorCode err = comp->bmi2_read_register_cb(reg_addr, reg_data, (size_t) len);
+  return (err == i2c::ERROR_OK) ? BMI2_INTF_RET_SUCCESS : BMI2_E_COM_FAIL;
+}
+
+static int8_t bmi2_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr) {
+  if (intf_ptr == nullptr)
+    return BMI2_E_NULL_PTR;
+  auto comp = static_cast<BMI270Component *>(intf_ptr);
+  if (comp == nullptr)
+    return BMI2_E_NULL_PTR;
+  i2c::ErrorCode err = comp->bmi2_write_register_cb(reg_addr, reg_data, (size_t) len);
+  return (err == i2c::ERROR_OK) ? BMI2_INTF_RET_SUCCESS : BMI2_E_COM_FAIL;
+}
+
+static void bmi2_delay_us(uint32_t period, void * /*intf_ptr*/) { delayMicroseconds(period); }
+
+static float lsb_to_mps2(int16_t val, float g_range, uint8_t bit_width) {
+  double power = 2;
+  float half_scale = (float) ((pow((double) power, (double) bit_width) / 2.0));
+  return (GRAVITY_EARTH * val * g_range) / half_scale;
+}
+
+static float lsb_to_dps(int16_t val, float dps, uint8_t bit_width) {
+  double power = 2;
+  float half_scale = (float) ((pow((double) power, (double) bit_width) / 2.0));
+  return (dps / (half_scale)) * (val);
+}
+
 void BMI270Component::internal_setup_(int stage) {
   switch (stage) {
     case 0:
+      // If we haven't performed a soft reset yet, do it now and wait.
+      if (!this->did_reset_) {
+        ESP_LOGD(TAG, "Performing soft reset of BMI270");
+        if (!this->write_byte(BMI270_REGISTER_CMD, (uint8_t) Cmd::SOFT_RESET)) {
+          ESP_LOGW(TAG, "Failed to write SOFT_RESET");
+          this->mark_failed();
+          return;
+        }
+        // wait for reset to complete per datasheet
+        this->set_timeout(100, [this]() {
+          this->did_reset_ = true;
+          this->internal_setup_(0);
+        });
+        return;
+      }
+
       uint8_t chipid;
       if (!this->read_byte(BMI270_REGISTER_CHIPID, &chipid) || (chipid != BMI270_CHIP_ID)) {
+        ESP_LOGW(TAG, "Unexpected CHIP ID: 0x%02X", chipid);
         this->mark_failed();
         return;
+      }
+      ESP_LOGD(TAG, "Read CHIP ID: 0x%02X", chipid);
+
+      // Try BMI2 initialization (preferred). If it fails, fall back to legacy
+      // register-based setup below.
+      if (!this->is_initialized_) {
+        ESP_LOGD(TAG, "Initializing BMI2 API for BMI270");
+        // populate bmi2 device callbacks and pointers
+        this->sensor_.read = bmi2_i2c_read;
+        this->sensor_.write = bmi2_i2c_write;
+        this->sensor_.delay_us = bmi2_delay_us;
+        this->sensor_.intf_ptr = static_cast<void *>(this);
+        this->sensor_.intf = BMI2_I2C_INTF;
+        this->sensor_.read_write_len = 128;
+        // Do not set config_file_ptr/size here; bmi270_init will populate device
+        int8_t rslt = bmi270_init(&this->sensor_);
+        if (rslt != BMI2_OK) {
+          ESP_LOGW(TAG, "BMI2 init failed (%d), falling back to legacy init", rslt);
+          // leave is_initialized_ false -> legacy path will run
+        } else {
+          ESP_LOGD(TAG, "BMI2 initialized OK");
+          // configure accel & gyro with sane defaults and enable them
+          struct bmi2_sens_config configs[2];
+          configs[0].type = BMI2_ACCEL;
+          configs[1].type = BMI2_GYRO;
+          if (bmi2_get_sensor_config(configs, 2, &this->sensor_) == BMI2_OK) {
+            configs[0].cfg.acc.odr = BMI2_ACC_ODR_200HZ;
+            configs[0].cfg.acc.range = BMI2_ACC_RANGE_2G;
+            configs[0].cfg.acc.bwp = BMI2_ACC_NORMAL_AVG4;
+            configs[0].cfg.acc.filter_perf = BMI2_PERF_OPT_MODE;
+
+            configs[1].cfg.gyr.odr = BMI2_GYR_ODR_200HZ;
+            configs[1].cfg.gyr.range = BMI2_GYR_RANGE_2000;
+            configs[1].cfg.gyr.bwp = BMI2_GYR_NORMAL_MODE;
+            configs[1].cfg.gyr.noise_perf = BMI2_POWER_OPT_MODE;
+            configs[1].cfg.gyr.filter_perf = BMI2_PERF_OPT_MODE;
+
+            if (bmi2_set_sensor_config(configs, 2, &this->sensor_) == BMI2_OK) {
+              uint8_t sens_list[2] = {BMI2_ACCEL, BMI2_GYRO};
+              if (bmi2_sensor_enable(sens_list, 2, &this->sensor_) == BMI2_OK) {
+                ESP_LOGD(TAG, "BMI2 accel+gyro enabled");
+                this->is_initialized_ = true;
+                this->sensors_active_ = true;
+                // store some scalars for conversions
+                this->accel_sensitivity_ = (float) configs[0].cfg.acc.range;  // e.g., 2
+                this->gyro_sensitivity_ = (float) (configs[1].cfg.gyr.range == BMI2_GYR_RANGE_2000 ? 2000 : 0);
+                this->setup_complete_ = true;
+                return;
+              }
+            }
+          }
+          ESP_LOGW(TAG, "BMI2 configuration/enable failed, falling back to legacy register init");
+        }
       }
 
       ESP_LOGV(TAG, "  Bringing accelerometer out of sleep");
@@ -139,7 +249,7 @@ void BMI270Component::internal_setup_(int stage) {
       }
       ESP_LOGV(TAG, "  Waiting for accelerometer to wake up");
       // need to wait (max delay in datasheet) because we can't send commands while another is in progress
-      // min 5ms, 10ms
+      // min 5ms, 10ms - short wait is enough for accelerometer
       this->set_timeout(10, [this]() { this->internal_setup_(1); });
       break;
 
@@ -150,8 +260,8 @@ void BMI270Component::internal_setup_(int stage) {
         return;
       }
       ESP_LOGV(TAG, "  Waiting for gyroscope to wake up");
-      // wait between 51 & 81ms, doing 100 to be safe
-      this->set_timeout(10, [this]() { this->internal_setup_(2); });
+      // wait between 51 & 81ms according to datasheet — use 100ms to be safe
+      this->set_timeout(100, [this]() { this->internal_setup_(2); });
       break;
 
     case 2:
@@ -186,8 +296,46 @@ void BMI270Component::internal_setup_(int stage) {
         return;
       }
 
+      // Read back config registers to verify writes succeeded
+      uint8_t read_val;
+      if (this->read_byte(BMI270_REGISTER_GYRO_CONFIG, &read_val)) {
+        ESP_LOGD(TAG, "GYRO_CONFIG readback: 0x%02X", read_val);
+      } else {
+        ESP_LOGW(TAG, "Failed to read back GYRO_CONFIG");
+      }
+      if (this->read_byte(BMI270_REGISTER_GYRO_RANGE, &read_val)) {
+        ESP_LOGD(TAG, "GYRO_RANGE readback: 0x%02X", read_val);
+      } else {
+        ESP_LOGW(TAG, "Failed to read back GYRO_RANGE");
+      }
+      if (this->read_byte(BMI270_REGISTER_ACCEL_CONFIG, &read_val)) {
+        ESP_LOGD(TAG, "ACCEL_CONFIG readback: 0x%02X", read_val);
+      } else {
+        ESP_LOGW(TAG, "Failed to read back ACCEL_CONFIG");
+      }
+      if (this->read_byte(BMI270_REGISTER_ACCEL_RANGE, &read_val)) {
+        ESP_LOGD(TAG, "ACCEL_RANGE readback: 0x%02X", read_val);
+      } else {
+        ESP_LOGW(TAG, "Failed to read back ACCEL_RANGE");
+      }
+
       this->setup_complete_ = true;
   }
+}
+
+// BMI2 I2C wrapper implementations (public methods)
+i2c::ErrorCode BMI270Component::bmi2_read_register_cb(uint8_t reg, uint8_t *data, size_t len) {
+  if (this->bus_ == nullptr) {
+    return i2c::ERROR_NOT_INITIALIZED;
+  }
+  return this->read_register(reg, data, len);
+}
+
+i2c::ErrorCode BMI270Component::bmi2_write_register_cb(uint8_t reg, const uint8_t *data, size_t len) {
+  if (this->bus_ == nullptr) {
+    return i2c::ERROR_NOT_INITIALIZED;
+  }
+  return this->write_register(reg, data, len);
 }
 
 void BMI270Component::setup() { this->internal_setup_(0); }
@@ -214,6 +362,11 @@ i2c::ErrorCode BMI270Component::read_le_int16_(uint8_t reg, int16_t *value, uint
   if (err != i2c::ERROR_OK) {
     return err;
   }
+  // Debug: log raw bytes read from the device
+  ESP_LOGD(TAG, "I2C read reg=0x%02X len=%d ->", reg, len * 2);
+  for (int i = 0; i < len * 2; i++) {
+    ESP_LOGD(TAG, "  raw[%d]=0x%02X", i, raw_data[i]);
+  }
   for (int i = 0; i < len; i++) {
     value[i] = (int16_t) ((uint16_t) raw_data[i * 2] | ((uint16_t) raw_data[i * 2 + 1] << 8));
   }
@@ -224,8 +377,78 @@ void BMI270Component::update() {
   if (!this->setup_complete_) {
     return;
   }
-
   ESP_LOGV(TAG, "    Updating BMI270");
+
+  // If we initialized the BMI2 API, prefer reading parsed sensor data from it.
+  if (this->is_initialized_ && this->sensors_active_) {
+    struct bmi2_sens_data sens_data = {{0}};
+    int8_t rslt = bmi2_get_sensor_data(&sens_data, &this->sensor_);
+    if (rslt != BMI2_OK) {
+      ESP_LOGW(TAG, "bmi2_get_sensor_data failed: %d", rslt);
+      this->status_set_warning();
+      return;
+    }
+
+    // Ensure data-ready bits for both accel and gyro
+    if (!((sens_data.status & BMI2_DRDY_ACC) && (sens_data.status & BMI2_DRDY_GYR))) {
+      ESP_LOGV(TAG, "BMI2 did not report both ACC and GYR data-ready (status=0x%02X)", sens_data.status);
+      this->status_set_warning();
+      return;
+    }
+
+    float accel_x = lsb_to_mps2(sens_data.acc.x, this->accel_sensitivity_ > 0 ? this->accel_sensitivity_ : 2.0f,
+                                this->sensor_.resolution);
+    float accel_y = lsb_to_mps2(sens_data.acc.y, this->accel_sensitivity_ > 0 ? this->accel_sensitivity_ : 2.0f,
+                                this->sensor_.resolution);
+    float accel_z = lsb_to_mps2(sens_data.acc.z, this->accel_sensitivity_ > 0 ? this->accel_sensitivity_ : 2.0f,
+                                this->sensor_.resolution);
+
+    float gyro_x = lsb_to_dps(sens_data.gyr.x, this->gyro_sensitivity_ > 0 ? this->gyro_sensitivity_ : 2000.0f,
+                              this->sensor_.resolution);
+    float gyro_y = lsb_to_dps(sens_data.gyr.y, this->gyro_sensitivity_ > 0 ? this->gyro_sensitivity_ : 2000.0f,
+                              this->sensor_.resolution);
+    float gyro_z = lsb_to_dps(sens_data.gyr.z, this->gyro_sensitivity_ > 0 ? this->gyro_sensitivity_ : 2000.0f,
+                              this->sensor_.resolution);
+
+    // Get temperature via BMI2 API if available, otherwise fallback to register read
+    float temperature = NAN;
+    int16_t bmi2_temp_raw = 0;
+    if (bmi2_get_temperature_data(&bmi2_temp_raw, &this->sensor_) == BMI2_OK) {
+      // vendor formula: temperature_value = (float)(((float)((int16_t)temperature_data)) / 512.0) + 23.0
+      temperature = (float) bmi2_temp_raw / 512.0f + 23.0f;
+    } else {
+      int16_t raw_temperature;
+      if (this->read_le_int16_(BMI270_REGISTER_DATA_TEMP_LSB, &raw_temperature, 1) == i2c::ERROR_OK)
+        temperature = (float) raw_temperature / (float) INT16_MAX * 64.5f + 23.f;
+    }
+
+    ESP_LOGD(TAG,
+             "Got accel={x=%.3f m/s², y=%.3f m/s², z=%.3f m/s²}, "
+             "gyro={x=%.3f °/s, y=%.3f °/s, z=%.3f °/s}, temp=%.3f°C",
+             accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, temperature);
+
+    if (this->accel_x_sensor_ != nullptr)
+      this->accel_x_sensor_->publish_state(accel_x);
+    if (this->accel_y_sensor_ != nullptr)
+      this->accel_y_sensor_->publish_state(accel_y);
+    if (this->accel_z_sensor_ != nullptr)
+      this->accel_z_sensor_->publish_state(accel_z);
+
+    if (this->temperature_sensor_ != nullptr && !std::isnan(temperature))
+      this->temperature_sensor_->publish_state(temperature);
+
+    if (this->gyro_x_sensor_ != nullptr)
+      this->gyro_x_sensor_->publish_state(gyro_x);
+    if (this->gyro_y_sensor_ != nullptr)
+      this->gyro_y_sensor_->publish_state(gyro_y);
+    if (this->gyro_z_sensor_ != nullptr)
+      this->gyro_z_sensor_->publish_state(gyro_z);
+
+    this->status_clear_warning();
+    return;
+  }
+
+  // Legacy register-based fallback (unchanged)
   int16_t data[6];
   if (this->read_le_int16_(BMI270_REGISTER_DATA_GYRO_X_LSB, data, 6) != i2c::ERROR_OK) {
     this->status_set_warning();
