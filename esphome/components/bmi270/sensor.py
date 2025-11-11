@@ -1,3 +1,10 @@
+"""Codegen for BMI270 component.
+
+This file exposes sensors for acceleration (x/y/z), gyroscope (x/y/z) and
+temperature. The configuration keys follow the same style as other IMU
+components (e.g. `acceleration_x`, `gyroscope_x`).
+"""
+
 import esphome.codegen as cg
 from esphome.components import i2c, sensor
 import esphome.config_validation as cv
@@ -24,6 +31,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["i2c"]
+
 
 bmi270_ns = cg.esphome_ns.namespace("bmi270")
 BMI270Component = bmi270_ns.class_(
