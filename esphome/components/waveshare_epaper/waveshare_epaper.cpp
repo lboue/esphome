@@ -909,6 +909,7 @@ void HOT GDEY0213F51::display()
 
 int GDEY0213F51::get_width_internal() { return 128; }
 int GDEY0213F51::get_height_internal() { return 250; }
+uint32_t GDEY0213F51::idle_timeout_() { return 60000; } // 60 sec
 void GDEY0213F51::dump_config() {
   LOG_DISPLAY("", "GoodDisplay E-Paper", this);
   ESP_LOGCONFIG(TAG, "  Model: 2.13in (BWRY) GDEY0213F51");
