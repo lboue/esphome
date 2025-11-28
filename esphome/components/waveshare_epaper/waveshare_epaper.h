@@ -220,6 +220,7 @@ class GDEY0213F51 : public WaveshareEPaper4C {
 
   int get_width_internal() override;
   int get_height_internal() override;
+  uint32_t idle_timeout_() override;
 };
 
 class WaveshareEPaper1P54InBV2 : public WaveshareEPaperBWR {
