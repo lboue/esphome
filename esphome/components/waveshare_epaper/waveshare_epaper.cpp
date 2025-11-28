@@ -319,6 +319,9 @@ uint32_t WaveshareEPaper::get_buffer_length_() {
 uint32_t WaveshareEPaperBWR::get_buffer_length_() {
   return this->get_width_controller() * this->get_height_internal() / 4u;
 }  // black and red buffer
+uint32_t WaveshareEPaper4C::get_buffer_length_() {
+  return this->get_width_controller() * this->get_height_internal() / 4u;
+}  // 4 colors buffer, 1 pixel = 2 bits, we will store 4 pixels in every byte
 uint32_t WaveshareEPaper7C::get_buffer_length_() {
   return this->get_width_controller() * this->get_height_internal() / 8u * 3u;
 }  // 7 colors buffer, 1 pixel = 3 bits, we will store 8 pixels in 24 bits = 3 bytes
@@ -348,6 +351,55 @@ void HOT WaveshareEPaperBWR::draw_absolute_pixel_internal(int x, int y, Color co
     this->buffer_[pos + buf_half_len] &= ~(0x80 >> subpos);
   }
 }
+void WaveshareEPaper4C::fill(Color color) {
+  uint8_t pixel_color;
+  if (color.is_on()) {
+    pixel_color = this->color_to_hex(color);
+  } else {
+    pixel_color = 0x1 << 6;
+  }
+
+  if (this->buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Buffer unavailable!");
+  } else {
+    uint32_t buffer_length = this->get_buffer_length_();
+    for(uint16_t i = 0; i < buffer_length; i++)
+    {
+        this->buffer_[i] =  ((pixel_color >> 6) & 0x03) * 0x55;
+    }
+}
+}
+void HOT WaveshareEPaper4C::draw_absolute_pixel_internal(int x, int y, Color color) {
+  if (x >= this->get_width_internal() || y >= this->get_height_internal() || x < 0 || y < 0)
+    return;
+
+  const uint32_t pos = (x + y * this->get_width_internal()) / 4u;
+  const uint8_t subpos = x & 0x03;
+  const uint8_t pixel_bits = this->color_to_hex(color);
+
+  this->buffer_[pos] &= ~(0xC0 >> (subpos * 2));
+  this->buffer_[pos] |= pixel_bits >> (subpos * 2);
+}
+
+uint8_t WaveshareEPaper4C::color_to_hex(Color color) {
+  uint8_t hex_code;
+  if (color.red > 127) {
+    if (color.green > 170) {
+      if (color.blue > 127) {
+        hex_code = 0b01 << 6;  // White
+      } else {
+        hex_code = 0b10 << 6;  // Yellow
+      }
+    } else {
+      hex_code = 0b11 << 6;  // Red
+    }
+  } else {
+    hex_code = 0b00 << 6;  // Black
+  }
+
+  return hex_code;
+}
+
 void HOT WaveshareEPaper7C::draw_absolute_pixel_internal(int x, int y, Color color) {
   if (x >= this->get_width_internal() || y >= this->get_height_internal() || x < 0 || y < 0)
     return;
@@ -759,6 +811,114 @@ uint32_t WaveshareEPaperTypeA::idle_timeout_() {
     default:
       return WaveshareEPaperBase::idle_timeout_();
   }
+}
+
+
+
+void GDEY0213F51::initialize()
+{
+  delay(50);//At least 20ms delay 
+  this->reset_();
+	delay(50);//At least 50ms delay 
+	this->wait_until_idle_();
+  this->command(0x4D);
+  this->data(0x78);
+
+  this->command(0x00); //PSR
+  this->data(0x0F);
+  this->data(0x29);
+
+  this->command(0x01); //PWRR
+  this->data(0x07);
+
+  
+  this->command(0x03); //POFS
+  this->data(0x10);
+  this->data(0x54);
+  this->data(0x44);
+  
+  this->command(0x06); //BTST_P
+  this->data(0x0F);
+  this->data(0x0A);
+  this->data(0x2F);
+  this->data(0x25);
+  this->data(0x22);
+  this->data(0x2E);
+  this->data(0x21); 
+
+  this->command(0x50); //CDI
+  this->data(0x37);
+  
+  this->command(0x60); //TCON
+  this->data(0x02);
+  this->data(0x02);
+  
+  this->command(0x61); //TRES
+  this->data(128/256);   // Source_BITS_H
+  this->data(128%256);   // Source_BITS_L
+  this->data(250/256);     // Gate_BITS_H
+  this->data(250%256);     // Gate_BITS_L  
+  
+  this->command(0xE7);
+  this->data(0x1C);
+  
+  this->command(0xE3); 
+  this->data(0x22);
+  
+  this->command(0xB4);
+  this->data(0xD0);
+  this->command(0xB5);
+  this->data(0x03);
+  
+  this->command(0xE9);
+  this->data(0x01); 
+
+  this->command(0x30);
+  this->data(0x08);  
+  
+  this->command(0x04);
+  this->wait_until_idle_();  
+}
+
+void HOT GDEY0213F51::display()
+{
+  
+  this->initialize();
+  const uint32_t buf_len = this->get_buffer_length_();
+
+  unsigned int i,j;
+  unsigned char temp1;
+  unsigned char data_H1,data_H2,data_L1,data_L2,data;
+  this->command(0x10);  
+
+    for(i=0;i<buf_len;i++)  
+	{
+      temp1=(this->buffer_[i]); 
+      data_H1=(temp1>>6&0x03)<<6;      
+      data_H2=(temp1>>4&0x03)<<4;
+      data_L1=(temp1>>2&0x03)<<2;
+      data_L2=(temp1&0x03);
+      data=data_H1|data_H2|data_L1|data_L2;
+      this->data(data);
+  }
+
+  this->command(0x12); //Display Update Control
+	this->data(0x00);
+  this->wait_until_idle_(); 
+}
+
+int GDEY0213F51::get_width_internal() { return 128; }
+int GDEY0213F51::get_height_internal() { return 250; }
+void GDEY0213F51::dump_config() {
+  LOG_DISPLAY("", "GoodDisplay E-Paper", this);
+  ESP_LOGCONFIG(TAG, "  Model: 2.13in (BWRY) GDEY0213F51");
+  LOG_PIN("  Reset Pin: ", this->reset_pin_);
+  LOG_PIN("  DC Pin: ", this->dc_pin_);
+  LOG_PIN("  Busy Pin: ", this->busy_pin_);
+  LOG_UPDATE_INTERVAL(this);
+}
+void GDEY0213F51::set_full_update_every(uint32_t full_update_every) {
+  this->full_update_every_ = full_update_every;
 }
 
 // ========================================================
@@ -1452,6 +1612,119 @@ void WaveshareEPaper2P9InD::dump_config() {
   LOG_PIN("  Busy Pin: ", this->busy_pin_);
   LOG_UPDATE_INTERVAL(this);
 }
+
+
+
+void GDEY029F51H::initialize()
+{
+  delay(50);//At least 20ms delay 
+  this->reset_();
+	delay(50);//At least 50ms delay 
+	this->wait_until_idle_();
+  this->command(0x4D);
+  this->data(0x78);
+
+  this->command(0x00); //PSR
+  this->data(0x0F);
+  this->data(0x29);
+
+  this->command(0x01); //PWRR
+  this->data(0x07);
+  this->data(0x00);
+  
+  this->command(0x03); //POFS
+  this->data(0x10);
+  this->data(0x54);
+  this->data(0x44);
+  
+  this->command(0x06); //BTST_P
+  this->data(0x05);
+  this->data(0x00);
+  this->data(0x3F);
+  this->data(0x0A);
+  this->data(0x25);
+  this->data(0x12);
+  this->data(0x1A); 
+
+  this->command(0x50); //CDI
+  this->data(0x37);
+  
+  this->command(0x60); //TCON
+  this->data(0x02);
+  this->data(0x02);
+  
+  this->command(0x61); //TRES
+  this->data(128/256);   // Source_BITS_H
+  this->data(128%256);   // Source_BITS_L
+  this->data(296/256);     // Gate_BITS_H
+  this->data(296%256);     // Gate_BITS_L  
+  
+  this->command(0xE7);
+  this->data(0x1C);
+  
+  this->command(0xE3); 
+  this->data(0x22);
+  
+  this->command(0xB4);
+  this->data(0xD0);
+  this->command(0xB5);
+  this->data(0x03);
+  
+  this->command(0xE9);
+  this->data(0x01); 
+
+  this->command(0x30);
+  this->data(0x08);  
+  
+  this->command(0x04);
+  this->wait_until_idle_();  
+}
+
+void HOT GDEY029F51H::display()
+{
+  
+  this->initialize();
+  const uint32_t buf_len = this->get_buffer_length_();
+
+  unsigned int i,j;
+  unsigned char temp1;
+  unsigned char data_H1,data_H2,data_L1,data_L2,data;
+  this->command(0x10);  
+  // for (uint32_t i = 0; i < buf_len; i++) {
+  //   this->data(this->buffer_[i]);
+  // }
+  // this->start_data_();
+  // this->write_array(this->buffer_, this->get_buffer_length_());
+  // this->end_data_();
+    for(i=0;i<buf_len;i++)  
+	{
+      temp1=(this->buffer_[i]); 
+      data_H1=(temp1>>6&0x03)<<6;      
+      data_H2=(temp1>>4&0x03)<<4;
+      data_L1=(temp1>>2&0x03)<<2;
+      data_L2=(temp1&0x03);
+      data=data_H1|data_H2|data_L1|data_L2;
+      this->data(data);
+  } 
+  this->command(0x12); //Display Update Control
+	this->data(0x00);
+  this->wait_until_idle_(); 
+}
+
+int GDEY029F51H::get_width_internal() { return 128; }
+int GDEY029F51H::get_height_internal() { return 296; }
+void GDEY029F51H::dump_config() {
+  LOG_DISPLAY("", "GoodDisplay E-Paper", this);
+  ESP_LOGCONFIG(TAG, "  Model: 2.9in (BWRY) GDEY029F51H");
+  LOG_PIN("  Reset Pin: ", this->reset_pin_);
+  LOG_PIN("  DC Pin: ", this->dc_pin_);
+  LOG_PIN("  Busy Pin: ", this->busy_pin_);
+  LOG_UPDATE_INTERVAL(this);
+}
+void GDEY029F51H::set_full_update_every(uint32_t full_update_every) {
+  this->full_update_every_ = full_update_every;
+}
+
 
 // DKE 2.9
 // https://www.badge.team/docs/badges/sha2017/hardware/#e-ink-display-the-dke-group-depg0290b1
@@ -2274,11 +2547,11 @@ void GDEW0154M09::clear_() {
   uint32_t pixsize = this->get_buffer_length_();
   for (uint8_t j = 0; j < 2; j++) {
     this->command(CMD_DTM1_DATA_START_TRANS);
-    for (uint32_t count = 0; count < pixsize; count++) {
+    for (int count = 0; count < pixsize; count++) {
       this->data(0x00);
     }
     this->command(CMD_DTM2_DATA_START_TRANS2);
-    for (uint32_t count = 0; count < pixsize; count++) {
+    for (int count = 0; count < pixsize; count++) {
       this->data(0xff);
     }
     this->command(CMD_DISPLAY_REFRESH);
@@ -2291,11 +2564,11 @@ void HOT GDEW0154M09::display() {
   this->init_internal_();
   // "Mode 0 display" for now
   this->command(CMD_DTM1_DATA_START_TRANS);
-  for (uint32_t i = 0; i < this->get_buffer_length_(); i++) {
+  for (int i = 0; i < this->get_buffer_length_(); i++) {
     this->data(0xff);
   }
   this->command(CMD_DTM2_DATA_START_TRANS2);  // write 'new' data to SRAM
-  for (uint32_t i = 0; i < this->get_buffer_length_(); i++) {
+  for (int i = 0; i < this->get_buffer_length_(); i++) {
     this->data(this->buffer_[i]);
   }
   this->command(CMD_DISPLAY_REFRESH);
@@ -2759,6 +3032,83 @@ void WaveshareEPaper4P2InBV2BWR::dump_config() {
   LOG_PIN("  Busy Pin: ", this->busy_pin_);
   LOG_UPDATE_INTERVAL(this);
 }
+
+
+void WaveshareEPaper4P26In::initialize() {
+  // https://www.waveshare.net/w/upload/4/46/4.26inch_e-Paper_User_Manual.pdf
+  this->wait_until_idle_();  
+	this->command(0x12);  //SWRESET
+	this->wait_until_idle_();    
+	
+	this->command(0x18); // use the internal temperature sensor
+	this->data(0x80);
+
+	this->command(0x0C); //set soft start     
+	this->data(0xAE);
+	this->data(0xC7);
+	this->data(0xC3);
+	this->data(0xC0);
+	this->data(0x80);
+
+	this->command(0x01);   //      drive output control    
+	this->data((get_height_internal()-1)%256); //  Y  
+	this->data((get_height_internal()-1)/256); //  Y 
+	this->data(0x02);
+
+	this->command(0x3C);        // Border       Border setting 
+	this->data(0x01);
+
+	this->command(0x11);        //    data  entry  mode
+	this->data(0x01);           //       X-mode  x+ y-    
+
+  this->command(0x44); // SET_RAM_X_ADDRESS_START_END_POSITION
+  this->data(0 & 0xFF);
+  this->data((0>>8) & 0x03);
+  this->data((get_width_internal() - 1) & 0xFF);
+  this->data(((get_width_internal() - 1)>>8) & 0x03);
+
+  this->command(0x45); // SET_RAM_Y_ADDRESS_START_END_POSITION
+  this->data((get_height_internal()- 1) & 0xFF);
+  this->data(((get_height_internal() - 1)>>8) & 0x03);
+  this->data(0 & 0xFF);
+  this->data((0>>8) & 0x03);
+
+  this->command(0x4E); // SET_RAM_X_ADDRESS_COUNTER
+  this->data(0 & 0xFF);
+  this->data((0>>8) & 0x03);
+
+  this->command(0x4F); // SET_RAM_Y_ADDRESS_COUNTER
+  this->data(0 & 0xFF);
+  this->data((0>>8) & 0x03);
+
+	this->wait_until_idle_(); 
+ 
+}
+void HOT WaveshareEPaper4P26In::display() {
+	this->command(0x24);   //write RAM for black(0)/white (1)
+  
+  delay(2);
+  this->start_data_();
+  this->write_array(this->buffer_, this->get_buffer_length_());
+  this->end_data_();
+  delay(2);
+
+	this->command(0x22); //Display Update Control
+	this->data(0xF7);
+	this->command(0x20); //Activate Display Update Sequence
+	this->wait_until_idle_(); 
+}
+int WaveshareEPaper4P26In::get_width_internal() { return 800; }
+int WaveshareEPaper4P26In::get_height_internal() { return 480; }
+void WaveshareEPaper4P26In::dump_config() {
+  LOG_DISPLAY("", "Waveshare E-Paper", this);
+  ESP_LOGCONFIG(TAG, "  Model: 4.26in");
+  LOG_PIN("  Reset Pin: ", this->reset_pin_);
+  LOG_PIN("  DC Pin: ", this->dc_pin_);
+  LOG_PIN("  Busy Pin: ", this->busy_pin_);
+  LOG_UPDATE_INTERVAL(this);
+}
+
 
 void WaveshareEPaper5P8In::initialize() {
   // COMMAND POWER SETTING
