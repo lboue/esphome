@@ -20,4 +20,11 @@ DriverChip(
     dc_pin=35,
     invert_colors=True,
     data_rate="40MHz",
+    initsequence=(
+        (0x11,),  # Sleep out
+        (0x3A, 0x55),  # Set color mode to 16-bit
+        (0x36, 0x00),  # Set memory access control
+        (0x21,),  # Display inversion on
+        (0x29,),  # Display on
+    ),
 )
