@@ -1,6 +1,6 @@
 #include "bmi270.h"
-#include "/workspaces/esphome/esphome/components/bmi270/bmi2/bmi2.h"
-#include "/workspaces/esphome/esphome/components/bmi270/bmi2/bmi270.h"
+#include <esphome/components/bmi270/bmi2/bmi2.h>
+#include <esphome/components/bmi270/bmi2/bmi270.h>
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include <cmath>

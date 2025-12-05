@@ -4,7 +4,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/i2c/i2c.h"
 // BMI2 vendored headers
-#include "bmi2/bmi2.h"
+#include <esphome/components/bmi270/bmi2/bmi2.h>
 
 namespace esphome {
 namespace bmi270 {
