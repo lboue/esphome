@@ -11,6 +11,8 @@ ST7789V.extend(
     dc_pin=23,
     reset_pin=18,
     invert_colors=True,
+    mirror_x=False,
+    rotation=270,
 )
 
 models = {}
