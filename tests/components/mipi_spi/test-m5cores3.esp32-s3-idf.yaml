@@ -1,0 +1,12 @@
+substitutions:
+  reset_pin: GPIO36
+
+packages:
+  spi: !include ../../test_build_components/common/spi/esp32-s3-idf.yaml
+
+display:
+  - platform: mipi_spi
+    model: M5CORES3
+    reset_pin: ${reset_pin}
+    show_test_card: true
+    spi_mode: mode0
