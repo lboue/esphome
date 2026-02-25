@@ -122,7 +122,7 @@ def _check_versions(config):
     else:
         if value[CONF_VERSION] == "recommended":
             value[CONF_VERSION] = FRAMEWORK_RECOMMENDED_VERSION
-        # We only validate this is there's no custom source
+        # We only validate this if there's no custom source
         value = _validate_default_framework_version(value)
         value[CONF_SOURCE] = _get_default_framework_source(value[CONF_VERSION])
 
