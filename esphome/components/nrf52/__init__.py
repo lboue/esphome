@@ -10,6 +10,7 @@ import subprocess
 from esphome import pins
 import esphome.codegen as cg
 from esphome.components.zephyr import (
+    HexValue,
     add_extra_script,
     copy_files as zephyr_copy_files,
     zephyr_add_overlay,
@@ -367,6 +368,60 @@ async def to_code(config: ConfigType) -> None:
 
     if config[KEY_BOOTLOADER] == BOOTLOADER_MCUBOOT:
         cg.add_define("USE_BOOTLOADER_MCUBOOT")
+        if config[CONF_BOARD] in BOARDS_ZEPHYR:
+            # These boards ship a devicetree with a fixed UF2/Adafruit-style
+            # partition table (no slot0/slot1 labels), which the dynamic
+            # Partition Manager needs when sysbuild builds MCUboot as a child
+            # image. Pin the app slots explicitly; MCUboot itself is placed by
+            # the dynamic Partition Manager via PM_PARTITION_SIZE_MCUBOOT.
+            mcuboot_size = 0x9000
+            total_flash_size = 0x100000  # nRF52840: 1 MB flash
+            slot0_start = mcuboot_size
+            slot_size = ((total_flash_size - slot0_start) // 2 // 0x1000) * 0x1000
+            slot1_start = slot0_start + slot_size
+
+            def _mcuboot_partition_overlay() -> str:
+                def part(name, start, size):
+                    return f"""
+                    {name}: partition@{start:x} {{
+                        reg = <0x{start:x} 0x{size:x}>;
+                    }};"""
+
+                return f"""
+                    /delete-node/ &boot_partition;
+                    /delete-node/ &storage_partition;
+                    /delete-node/ &code_partition;
+                    /delete-node/ &sd_partition;
+
+                    &flash0 {{
+                        partitions {{
+                            compatible = "fixed-partitions";
+                            #address-cells = <1>;
+                            #size-cells = <1>;
+                            {part("slot0_partition", slot0_start, slot_size)}
+                            {part("slot1_partition", slot1_start, slot_size)}
+                        }};
+                    }};
+                """
+
+            def _code_partition_overlay() -> str:
+                return """
+                    / {
+                        chosen {
+                            zephyr,code-partition = &slot0_partition;
+                        };
+                    };
+                    """
+
+            zephyr_add_overlay(_mcuboot_partition_overlay())
+            zephyr_add_overlay(_mcuboot_partition_overlay(), "mcuboot")
+            zephyr_add_overlay(_code_partition_overlay())
+            zephyr_add_overlay(_code_partition_overlay(), "mcuboot")
+            zephyr_add_prj_conf("USB_DEVICE_STACK", False, image="mcuboot")
+            zephyr_add_prj_conf("CONSOLE", False, image="mcuboot")
+            zephyr_add_prj_conf(
+                "PM_PARTITION_SIZE_MCUBOOT", HexValue(mcuboot_size), image="mcuboot"
+            )
     elif "_sd" in config[KEY_BOOTLOADER]:
         bootloader = config[KEY_BOOTLOADER].split("_")
         sd_id = bootloader[2][2:]
