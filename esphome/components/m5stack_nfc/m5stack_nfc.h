@@ -20,6 +20,7 @@ class M5StackNFCComponent : public PollingComponent, public i2c::I2CDevice {
  private:
   bool read_tag(NFCTag &tag);
   bool read_version();
+  bool read_ic_identity();
 
   bool initialized_{false};
 };

@@ -3,6 +3,7 @@
 
 #include "esphome/core/log.h"
 
+// https://github.com/m5stack/M5Unit-NFC/blob/main/examples/UnitUnified/NFCA/Detect/main/Detect.cpp
 namespace esphome {
 namespace m5stack_nfc {
 
@@ -34,11 +35,21 @@ void M5StackNFCComponent::update() {
   if (this->read_tag(tag)) {
     ESP_LOGI(TAG, "NFC tag detected");
 
-    ESP_LOGI(TAG, "UID length: %u", tag.uid_length);
+    ESP_LOGI(TAG, "UID length: %d", tag.uid_length);
+
+    std::string uid;
 
     for (uint8_t i = 0; i < tag.uid_length; i++) {
-      ESP_LOGI(TAG, "UID[%u]=0x%02X", i, tag.uid[i]);
+      char buffer[4];
+      snprintf(buffer, sizeof(buffer), "%02X", tag.uid[i]);
+      uid += buffer;
+
+      if (i < tag.uid_length - 1) {
+        uid += ":";
+      }
     }
+
+    ESP_LOGI(TAG, "UID: %s", uid.c_str());
   }
 }
 
@@ -53,6 +64,21 @@ bool M5StackNFCComponent::read_tag(NFCTag &tag) {
   tag.uid_length = 0;
 
   return false;
+}
+
+bool M5StackNFCComponent::read_ic_identity() {
+  uint8_t value;
+
+  auto err = this->read_register(st25r3916::REG_IC_IDENTITY, &value, 1);
+
+  if (err != i2c::ERROR_OK) {
+    ESP_LOGE(TAG, "Failed to read IC identity");
+    return false;
+  }
+
+  ESP_LOGI(TAG, "ST25R3916 identity: 0x%02X", value);
+
+  return value == st25r3916::IC_IDENTITY_ST25R3916;
 }
 
 }  // namespace m5stack_nfc
