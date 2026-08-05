@@ -1,0 +1,28 @@
+seesaw:
+  i2c_id: i2c_bus
+  id: seesaw_hub
+  address: 0x49
+
+sensor:
+  - platform: seesaw
+    seesaw_id: seesaw_hub
+    channel: 0
+    name: Encoder Position
+
+binary_sensor:
+  - platform: gpio
+    name: Encoder Button
+    pin:
+      seesaw: seesaw_hub
+      number: 12
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+
+light:
+  - platform: seesaw
+    seesaw_id: seesaw_hub
+    pin: 18
+    num_leds: 4
+    name: Encoder NeoPixels
