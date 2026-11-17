@@ -11,7 +11,12 @@ import pytest
 import serial
 
 from esphome.components.zephyr_rtos import reset_over_usb, upload_program
-from esphome.components.zephyr_rtos.const import CONF_BOOTLOADER, KEY_ZEPHYR_RTOS
+from esphome.components.zephyr_rtos.const import (
+    BOOTLOADER_MCUBOOT,
+    CONF_BOOTLOADER,
+    CONF_RUNNER,
+    KEY_ZEPHYR_RTOS,
+)
 from esphome.components.zephyr_rtos.variants import stm32c5
 import esphome.config_validation as cv
 from esphome.const import (
@@ -49,9 +54,15 @@ def _write_uf2() -> None:
     uf2.write_bytes(b"UF2 blocks")
 
 
-@pytest.mark.parametrize(("board", "expected"), [(XIAO, True), (NUCLEO, False)])
-def test_uses_tinyuf2(tmp_path: Path, board: str, expected: bool) -> None:
+@pytest.mark.parametrize(
+    ("board", "bootloader", "expected"),
+    [(XIAO, "", True), (XIAO, BOOTLOADER_MCUBOOT, False), (NUCLEO, "", False)],
+)
+def test_uses_tinyuf2(
+    tmp_path: Path, board: str, bootloader: str, expected: bool
+) -> None:
     _state(tmp_path, board)
+    CORE.data[KEY_ZEPHYR_RTOS]["bootloader"] = bootloader
     assert stm32c5.uses_tinyuf2() is expected
 
 
@@ -68,17 +79,34 @@ def test_config_schema_declares_the_touch_only_on_the_xiao(
     assert (stm32c5.CONF_TINYUF2_TOUCH in advanced) is declared
 
 
-def test_config_schema_rejects_mcuboot_on_the_xiao() -> None:
+def test_config_schema_requires_a_runner_for_mcuboot_on_the_xiao() -> None:
     config = {
         CONF_BOARD: XIAO,
         CONF_FRAMEWORK: {CONF_ADVANCED: {CONF_BOOTLOADER: "mcuboot"}},
     }
-    with pytest.raises(cv.Invalid, match="TinyUF2"):
+    with pytest.raises(cv.Invalid, match="runner"):
         stm32c5._xiao_config_schema(config)
 
 
+def test_config_schema_accepts_mcuboot_on_the_xiao_with_a_runner() -> None:
+    config = {
+        CONF_BOARD: XIAO,
+        CONF_FRAMEWORK: {
+            CONF_ADVANCED: {
+                CONF_BOOTLOADER: "mcuboot",
+                CONF_RUNNER: "stm32cubeprogrammer",
+            }
+        },
+    }
+    stm32c5._xiao_config_schema(config)
+    assert stm32c5.CONF_TINYUF2_TOUCH not in config[CONF_FRAMEWORK][CONF_ADVANCED]
+
+
 @pytest.mark.parametrize(("board", "built"), [(XIAO, True), (NUCLEO, False)])
-def test_to_code_builds_uf2_and_touch_only_on_the_xiao(board: str, built: bool) -> None:
+def test_to_code_builds_uf2_and_touch_only_on_the_xiao(
+    tmp_path: Path, board: str, built: bool
+) -> None:
+    _state(tmp_path, board)
     with (
         patch("esphome.components.zephyr_rtos.zephyr_add_prj_conf") as mock_conf,
         patch("esphome.components.zephyr_rtos.zephyr_add_overlay"),
@@ -99,6 +127,23 @@ def test_to_code_builds_uf2_and_touch_only_on_the_xiao(board: str, built: bool) 
         mock_job.assert_not_called()
 
 
+def test_to_code_turns_off_the_mcuboot_console_on_the_xiao(tmp_path: Path) -> None:
+    _state(tmp_path)
+    CORE.data[KEY_ZEPHYR_RTOS]["bootloader"] = BOOTLOADER_MCUBOOT
+    with (
+        patch("esphome.components.zephyr_rtos.zephyr_add_prj_conf") as mock_conf,
+        patch("esphome.components.zephyr_rtos.zephyr_add_overlay"),
+        patch(f"{_DTS}.dts_node_enabled", return_value=True),
+        patch(f"{_DTS}.has_pinctrl_configured", return_value=True),
+        patch.object(stm32c5.cg, "add_define") as mock_define,
+        patch.object(CORE, "add_job") as mock_job,
+    ):
+        stm32c5._xiao_to_code({CONF_BOARD: XIAO, CONF_FRAMEWORK: {CONF_ADVANCED: {}}})
+    mock_conf.assert_called_once_with("UART_CONSOLE", False, image="mcuboot")
+    mock_define.assert_not_called()
+    mock_job.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("clk48", "usb_pins", "expected"),
     [
@@ -109,8 +154,9 @@ def test_to_code_builds_uf2_and_touch_only_on_the_xiao(board: str, built: bool) 
     ],
 )
 def test_to_code_adds_usb_clock_and_pins_only_while_the_board_lacks_them(
-    clk48: bool, usb_pins: bool, expected: list[str]
+    tmp_path: Path, clk48: bool, usb_pins: bool, expected: list[str]
 ) -> None:
+    _state(tmp_path)
     with (
         patch("esphome.components.zephyr_rtos.zephyr_add_prj_conf"),
         patch("esphome.components.zephyr_rtos.zephyr_add_overlay") as mock_overlay,
