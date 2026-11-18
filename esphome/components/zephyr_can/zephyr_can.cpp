@@ -2,7 +2,6 @@
 
 #include "zephyr_can.h"
 
-#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
 #include <algorithm>
@@ -13,26 +12,8 @@ namespace esphome::zephyr_can {
 
 ESPHOME_LOG_TAG(TAG, "zephyr_can");
 
-// Controller state and error counters are only read this often -- they are polled from
-// loop(), which runs far more frequently than a bus error can meaningfully change.
-static const uint32_t STATE_POLL_INTERVAL_MS = 1000;
-
-static const char *can_state_str(can_state state) {
-  switch (state) {
-    case CAN_STATE_ERROR_ACTIVE:
-      return "error-active";
-    case CAN_STATE_ERROR_WARNING:
-      return "error-warning";
-    case CAN_STATE_ERROR_PASSIVE:
-      return "error-passive";
-    case CAN_STATE_BUS_OFF:
-      return "bus-off";
-    case CAN_STATE_STOPPED:
-      return "stopped";
-    default:
-      return "unknown";
-  }
-}
+// Failed transmissions are counted in ISR context and reported at most this often.
+static constexpr uint32_t TX_ERROR_REPORT_INTERVAL_MS = 1000;
 
 static const char *can_mode_str(can_mode_t mode) {
   if ((mode & CAN_MODE_LOOPBACK) != 0) {
@@ -81,12 +62,25 @@ bool ZephyrCan::setup_internal() {
   k_work_init(&this->tx_work_.work, tx_work_handler_);
 #endif
 
+#if KERNEL_VERSION_NUMBER >= 0x040500
+  this->state_callback_.parent = this;
+  can_init_state_change_callback(&this->state_callback_.callback, state_changed_);
+  err = can_add_state_change_callback(this->can_dev_, &this->state_callback_.callback);
+  if (err != 0) {
+    ESP_LOGE(TAG, "can't add state change callback [%d]", err);
+    return false;
+  }
+#else
+  can_set_state_change_callback(this->can_dev_, state_changed_, this);
+#endif
+
   err = can_start(this->can_dev_);
   if (err != 0) {
     ESP_LOGE(TAG, "can_start failed [%d]", err);
     return false;
   }
 
+  this->set_interval(TX_ERROR_REPORT_INTERVAL_MS, [this]() { this->log_tx_errors_(); });
   return true;
 }
 
@@ -124,18 +118,7 @@ void ZephyrCan::dump_config() {
   canbus::Canbus::dump_config();
 }
 
-void ZephyrCan::loop() {
-  canbus::Canbus::loop();
-  this->log_bus_state_();
-}
-
-void ZephyrCan::log_bus_state_() {
-  const uint32_t now = App.get_loop_component_start_time();
-  if (now - this->last_state_check_ < STATE_POLL_INTERVAL_MS) {
-    return;
-  }
-  this->last_state_check_ = now;
-
+void ZephyrCan::log_tx_errors_() {
   const atomic_val_t tx_errors = atomic_get(&this->tx_errors_);
   if (tx_errors != this->reported_tx_errors_) {
     ESP_LOGW(TAG, "%ld frame(s) failed to send, last error [%ld]",
@@ -143,27 +126,63 @@ void ZephyrCan::log_bus_state_() {
              static_cast<long>(atomic_get(&this->tx_last_error_)));
     this->reported_tx_errors_ = tx_errors;
   }
+}
 
+canbus::CanStatus ZephyrCan::get_status() {
+  canbus::CanStatus status = {};
+  if (this->is_failed()) {
+    return status;
+  }
+  status.tx_failed_count = static_cast<uint32_t>(atomic_get(&this->tx_errors_));
   enum can_state state;
   struct can_bus_err_cnt err_cnt;
   if (can_get_state(this->can_dev_, &state, &err_cnt) != 0) {
-    ESP_LOGW(TAG, "can't read controller state");
-    return;
+    ESP_LOGD(TAG, "can't read controller state");
+    return status;
   }
-  if (state == this->last_state_ && err_cnt.rx_err_cnt == this->last_err_cnt_.rx_err_cnt &&
-      err_cnt.tx_err_cnt == this->last_err_cnt_.tx_err_cnt) {
-    return;
-  }
-  this->last_state_ = state;
-  this->last_err_cnt_ = err_cnt;
+  status.bus_off = state == CAN_STATE_BUS_OFF;
+  status.rx_error_counter = err_cnt.rx_err_cnt;
+  status.tx_error_counter = err_cnt.tx_err_cnt;
+  return status;
+}
 
-  // The controller recovers from bus-off on its own, so this is a report, not an error.
-  if (state == CAN_STATE_ERROR_ACTIVE) {
-    ESP_LOGD(TAG, "state: %s, rx errors: %u, tx errors: %u", can_state_str(state), err_cnt.rx_err_cnt,
-             err_cnt.tx_err_cnt);
-  } else {
-    ESP_LOGW(TAG, "state: %s, rx errors: %u, tx errors: %u", can_state_str(state), err_cnt.rx_err_cnt,
-             err_cnt.tx_err_cnt);
+canbus::CanEventFlags ZephyrCan::get_events() {
+  return static_cast<canbus::CanEventFlags>(atomic_clear(&this->pending_events_));
+}
+
+#if KERNEL_VERSION_NUMBER >= 0x040500
+void ZephyrCan::state_changed_(const struct device *dev, struct can_state_change_callback *callback,
+                               enum can_state state, struct can_bus_err_cnt err_cnt) {
+  CONTAINER_OF(callback, StateCallback, callback)->parent->latch_state_(state);
+}
+#else
+void ZephyrCan::state_changed_(const struct device *dev, enum can_state state, struct can_bus_err_cnt err_cnt,
+                               void *user_data) {
+  static_cast<ZephyrCan *>(user_data)->latch_state_(state);
+}
+#endif
+
+// The controller recovers from bus-off on its own (CONFIG_CAN_MANUAL_RECOVERY_MODE is off), so state changes are
+// only latched here for the canbus core to log and to set or clear the bus-off warning.
+void ZephyrCan::latch_state_(enum can_state state) {
+  const enum can_state previous = this->isr_last_state_;
+  this->isr_last_state_ = state;
+  switch (state) {
+    case CAN_STATE_BUS_OFF:
+      atomic_or(&this->pending_events_, canbus::CAN_EVENT_BUS_OFF);
+      break;
+    case CAN_STATE_ERROR_PASSIVE:
+      atomic_or(&this->pending_events_, canbus::CAN_EVENT_PASSIVE);
+      break;
+    case CAN_STATE_ERROR_ACTIVE:
+    case CAN_STATE_ERROR_WARNING:
+      // Error-warning is still error-active, so only leaving passive or bus-off counts
+      if (previous == CAN_STATE_ERROR_PASSIVE || previous == CAN_STATE_BUS_OFF) {
+        atomic_or(&this->pending_events_, canbus::CAN_EVENT_ACTIVE);
+      }
+      break;
+    default:
+      break;
   }
 }
 
@@ -216,7 +235,7 @@ void ZephyrCan::send_next_() {
       if (err == 0) {
         return;
       }
-      // Stopped, bus-off, ...: drop the frame, loop() reports it.
+      // Stopped, bus-off, ...: drop the frame, log_tx_errors_() reports it.
       atomic_inc(&this->tx_errors_);
       atomic_set(&this->tx_last_error_, err);
     }
