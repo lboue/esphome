@@ -143,6 +143,8 @@ async def to_code(config: ConfigType) -> None:
     # Without this Zephyr rejects remote transmission request frames in the driver, so
     # they would never reach an on_frame trigger.
     zephyr_add_prj_conf("CAN_ACCEPT_RTR", True)
+    # The driver relies on the controller leaving bus-off without help.
+    zephyr_add_prj_conf("CAN_MANUAL_RECOVERY_MODE", False)
 
     board = zephyr_data()[KEY_BOARD]
     if explicit_instance := config.get(CONF_INSTANCE):
@@ -162,7 +164,7 @@ async def to_code(config: ConfigType) -> None:
         get_rate(config[CONF_BIT_RATE]),
         config[CONF_MODE],
     )
-    await register_canbus(var, config)
+    await register_canbus(var, config, reports_status=True)
 
     if (tx_buffer_size := config[CONF_TX_BUFFER_SIZE]) > 0:
         tx_queue = f"{config[CONF_ID]}_tx_queue"
