@@ -618,6 +618,7 @@ _VARIANT_MODULES = [
     "nrf54l15",
     "nrf54lm20a",
     "efr32mg24",
+    "efr32mg26",
     "simg301",
     "efr32bg27",
     "stm32l4",
