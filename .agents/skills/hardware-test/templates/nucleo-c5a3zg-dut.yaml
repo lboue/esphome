@@ -1,0 +1,19 @@
+# Minimal smoke test for the NUCLEO-C5A3ZG (STM32C5), flashed over the on-board STLINK-V3EC.
+# No board: needed -- nucleo_c5a3zg is the STM32C5 variant's default board.
+esphome:
+  name: nucleo-c5a3zg
+  on_boot:
+    - lambda: |-
+        ESP_LOGD("test", "millis=%u micros=%u cycles=%u",
+                 (unsigned) millis(), (unsigned) micros(),
+                 (unsigned) arch_get_cpu_cycle_count());
+        delay(1);
+        delayMicroseconds(1);
+
+stm32:
+  variant: STM32C5
+  framework:
+    type: zephyr
+
+logger:
+  level: VERY_VERBOSE

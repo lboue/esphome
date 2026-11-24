@@ -449,3 +449,6 @@ Ports are not listed on purpose: they follow the USB hub port and change on ever
 - `STM32_Programmer_CLI -c port=SWD` alone (no file given) is a quick bench check: it reports the ST-LINK
   firmware version, the board name, the device ID/revision and the flash/RAM size without touching the
   target's contents.
+- `templates/nucleo-c5a3zg-dut.yaml` is the minimal config used to confirm this flow end to end on a
+  NUCLEO-C5A3ZG: compiles, flashes over SWD, and boots cleanly with the logger auto-selecting `lpuart1`
+  as the console UART.
