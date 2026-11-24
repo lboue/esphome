@@ -1,0 +1,25 @@
+opentherm_slave:
+  id: boiler
+  in_pin: 4
+  out_pin: 16
+
+sensor:
+  - platform: opentherm_slave
+    ch_setpoint:
+      name: "Boiler CH setpoint"
+
+number:
+  - platform: opentherm_slave
+    relative_modulation_level:
+      name: "Boiler Relative modulation level"
+
+switch:
+  - platform: opentherm_slave
+    fault:
+      name: "Boiler Fault"
+    ch_active:
+      name: "Boiler CH active"
+    dhw_active:
+      name: "Boiler DHW active"
+    flame_active:
+      name: "Boiler Flame active"
