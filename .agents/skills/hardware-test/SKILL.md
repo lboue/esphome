@@ -97,6 +97,7 @@ driven, what the logs show, and the same flow on a `dev` build when a quirk coul
 | LN882H | ltchiptool forces 1 Mbaud for writes; weak adapters need `LN882H_YM_BAUDRATE` patched to 115200 in the penv's `ln882htool.py`; short BOOT to GND while the tool connects | OTA after the first flash |
 | nRF52840 Dongle (PCA10059) | Nordic `nrfutil nrf5sdk-tools dfu usb-serial` on the bootloader port, or `dfu: true` in the config so the 1200 baud touch pin-resets into the bootloader; adafruit-nrfutil is refused | app has two CDC ports, ESPHome log on the second |
 | Adafruit-style nRF52 (UF2 bootloader) | `UF2BOOT` volume or adafruit-nrfutil; `dfu: true` works through GPREGRET | single CDC port |
+| STM32 Nucleo (on-board STLINK, Zephyr) | `esphome upload --device <STLINK VCOM port>` (SWD, `west flash`); install STM32CubeProgrammer by hand first if the board's chip is too new for `openocd`/`pyocd` (`reference/boards.md`) | `serial_capture.py` on the STLINK VCOM port, started before a `STM32_Programmer_CLI -c port=SWD mode=UR reset=HWrst -hardRst` to get the boot from a settled state |
 | Any reachable device | `esphome upload <yaml> --device <ip or name.local>`; `--file <bin>` for a prebuilt image | `esphome logs --device <ip>` bounded with `timeout` |
 
 ESP-IDF OTA image: `.esphome/build/<name>/build/firmware.ota.bin`. LibreTiny OTA port is 8892.

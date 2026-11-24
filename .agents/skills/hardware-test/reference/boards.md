@@ -423,3 +423,29 @@ Ports are not listed on purpose: they follow the USB hub port and change on ever
 - LED0 P1.22, LED1 P1.25; BUTTON0 P1.26, BUTTON1 P1.09, BUTTON2 P1.08, BUTTON3 P0.05 (active low, pull-up). GPIO
   P1 registers at 0x500D8200 (IN +0x00C, PIN_CNF +0x080), P0 at 0x5010A200.
 - Binary sensor state changes are not logged at DEBUG; log the states or count `on_press` to see button presses.
+
+## STM32 Nucleo boards (on-board STLINK-V3EC/V2-1, Zephyr)
+
+- The STLINK's own USB device (`0483:3754` for STLINK-V3) exposes a VCOM port for the ESPHome log and the
+  SWD debug/programming interface used for flashing; there is no separate programmer to attach. `ports.py`
+  only shows the VCOM side.
+- `esphome upload --device <VCOM port>` drives `west flash` with the board's default runner. A brand-new chip
+  (for example the STM32C5 on the NUCLEO-C5A3ZG) is often missing from `openocd` and `pyocd`'s target databases
+  before either project has shipped support, and `west`'s generated `runners.yaml` (in the build directory)
+  then lists only `stm32cubeprogrammer` and `stlink_gdbserver` as available runners. STM32CubeProgrammer has no
+  Homebrew cask; download `SetupSTM32CubeProgrammer_<version>_Mac-aarch64.zip` from
+  <https://www.st.com/en/development-tools/stm32cubeprog.html> (gated behind a license click-through, so a
+  script cannot fetch it) and run the launcher inside the extracted `.app` bundle
+  (`SetupSTM32CubeProgrammer-<version>.app/Contents/MacOS/SetupSTM32CubeProgrammer-<version_with_underscores>_macos
+  -i silent`) with the `.app`'s parent directory as the working directory: the launcher script `cd`s into the
+  bundle using a path relative to its own invocation directory, so running it from inside `Contents/MacOS`
+  itself fails to find its resources. It installs to
+  `/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/`, with
+  `STM32CubeProgrammer.app/Contents/Resources/bin/STM32_Programmer_CLI` as the CLI `west flash` calls.
+- `esphome upload` triggers a reset as part of flashing, before a capture can be attached, so the first boot
+  after a fresh flash is lost. To capture a boot from a settled state, start `serial_capture.py <VCOM port>`
+  first, then reset with `STM32_Programmer_CLI -c port=SWD mode=UR reset=HWrst -hardRst` (`--reset` on
+  `serial_capture.py` has no effect here: the STLINK VCOM does not wire DTR/RTS to the target's reset line).
+- `STM32_Programmer_CLI -c port=SWD` alone (no file given) is a quick bench check: it reports the ST-LINK
+  firmware version, the board name, the device ID/revision and the flash/RAM size without touching the
+  target's contents.
