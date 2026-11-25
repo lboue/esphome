@@ -19,9 +19,14 @@ void OpenthermSlaveHub::loop() {
   if (this->opentherm_->has_message()) {
     OpenthermData data;
     this->opentherm_->get_message(data);
+    ESP_LOGD(TAG, "Received %s for id %u (HB: %u, LB: %u)",
+             this->opentherm_->message_type_to_str((MessageType) data.type), data.id, data.valueHB, data.valueLB);
     this->build_response_(data);
     this->opentherm_->send(data);
-  } else if (this->opentherm_->is_sent() || this->opentherm_->is_error()) {
+  } else if (this->opentherm_->is_error()) {
+    ESP_LOGW(TAG, "OpenTherm bus error: %s", this->opentherm_->operation_mode_to_str(this->opentherm_->get_mode()));
+    this->opentherm_->listen();
+  } else if (this->opentherm_->is_sent()) {
     this->opentherm_->listen();
   }
 }
