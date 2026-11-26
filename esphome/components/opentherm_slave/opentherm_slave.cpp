@@ -59,6 +59,12 @@ void OpenthermSlaveHub::build_response_(OpenthermData &data) {
   }
 }
 
+void OpenthermSlaveHub::set_ch_setpoint(float setpoint) {
+#ifdef USE_SENSOR
+  PUBLISH_STATE(this->ch_setpoint_sensor_, setpoint);
+#endif
+}
+
 void OpenthermSlaveHub::dump_config() {
   ESP_LOGCONFIG(TAG, "OpenTherm Slave:");
   LOG_PIN("  In Pin: ", this->in_pin_);

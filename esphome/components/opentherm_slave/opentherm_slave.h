@@ -25,6 +25,10 @@ class OpenthermSlaveHub : public Component {
   void set_flame_active(bool active) { this->flame_active_ = active; }
   void set_modulation_level(float level) { this->modulation_level_ = level; }
 
+  // Lets a number slider stand in for a real master's CH_SETPOINT write, so the sensor can be
+  // exercised without an OpenTherm bus connected.
+  void set_ch_setpoint(float setpoint);
+
 #ifdef USE_SENSOR
   void set_ch_setpoint_sensor(sensor::Sensor *ch_setpoint_sensor) { this->ch_setpoint_sensor_ = ch_setpoint_sensor; }
 #endif

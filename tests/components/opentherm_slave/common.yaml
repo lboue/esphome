@@ -12,6 +12,8 @@ number:
   - platform: opentherm_slave
     relative_modulation_level:
       name: "Boiler Relative modulation level"
+    ch_setpoint:
+      name: "Boiler CH setpoint (simulated)"
 
 switch:
   - platform: opentherm_slave
